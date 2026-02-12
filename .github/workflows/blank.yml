@@ -1,49 +1,58 @@
-# This is a basic workflow to help you get started with Actions
+name: Deploy Flask API
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
+  build-and-deploy:
     runs-on: ubuntu-latest
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4
 
-      # Set up Python
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      # Docker Image bauen
+      - name: Build Docker Image
+        run: |
+          docker build -t simple-flask:latest .
+
+      # Image als tar exportieren (Transfer auf Server)
+      - name: Save Docker Image
+        run: |
+          docker save simple-flask:latest -o simple-flask.tar
+
+      # Deploy per SSH
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.0
         with:
-          python-version: '3.12'
+          host: ${{ secrets.SERVER_HOST }}
+          username: deploy
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            # auf Server das alte Image stoppen & löschen
+            docker stop flaskapi || true
+            docker rm flaskapi || true
+            docker rmi simple-flask:latest || true
 
-      # Install dependencies
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      # Kopieren des Images auf den Server
+      - name: Copy Docker Image to Server
+        uses: appleboy/scp-action@v0.1.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: flaskuser
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "simple-flask.tar"
+          target: "~/simple-flask.tar"
 
-      # Test the Flask app
-      - name: Test Flask app
-        run: |
-          python -c "from app import app; print('Flask app imported successfully')"
-          # Start the app in background
-          python app.py &
-          sleep 5
-          # Test the endpoint
-          curl -f http://127.0.0.1:5000/
-          echo "Flask app is running and responding"
+      # Auf dem Server laden & Container starten
+      - name: Load Docker Image & Run Container
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: flaskuser
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            docker load -i ~/simple-flask.tar
+            docker run -d --name flaskapi -p 5123:5000 simple-flask:latest
