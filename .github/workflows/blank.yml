@@ -55,5 +55,5 @@ jobs:
           port: 22
           script: |
             docker load -i ~/simple-flask.tar
-            docker run -d --name flaskapi -p 5123:5000 simple-flask:latest
+            docker run -d --name flaskapi simple-flask:latest
             docker network connect docker_app-network flaskapi
